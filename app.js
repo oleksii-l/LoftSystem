@@ -14,7 +14,14 @@ app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 
-app.use('/', indexRouter);
+require('./auth/passport')
+
+app.use('/api', require('./routes'))
+
+app.use('*', (_req, res) => {
+  const file = path.resolve(__dirname, 'public', 'index.html')
+  res.sendFile(file)
+})
 
 // catch 404 and forward to error handler
 app.use(function(req, res, next) {
