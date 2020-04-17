@@ -3,7 +3,6 @@
 /**
  * Module dependencies.
  */
-
 var app = require('../app');
 var debug = require('debug')('loftsystem:server');
 var http = require('http');
@@ -20,6 +19,7 @@ app.set('port', port);
  */
 
 var server = http.createServer(app);
+const io = require('socket.io').listen(server)
 
 /**
  * Listen on provided port, on all network interfaces.
@@ -87,4 +87,66 @@ function onListening() {
     ? 'pipe ' + addr
     : 'port ' + addr.port;
   debug('Listening on ' + bind);
+}
+
+const connectedUsers = {}
+const historyMessage = {}
+
+io.on('connection', (socket) => {
+  const socketId = socket.id
+  socket.on('users:connect', function (data) {
+    // { userId: '5e9483d6d96b341ba80bc28e', username: 'krab' }
+    const user = { ...data, socketId, activeRoom: null }
+    connectedUsers[socketId] = user
+    socket.emit('users:list', Object.values(connectedUsers))
+    socket.broadcast.emit('users:add', user)
+  })
+  socket.on('message:add', function (data) {
+    // {senderId: '5e9483d6d96b341ba80bc28e', recipientId: '5e9483d6d96b341ba80bc28e', text: 'Hi'}
+    console.log('message:add')
+    console.log(data)
+    const { senderId, recipientId } = data
+    socket.emit('message:add', data)
+    socket.broadcast.to(data.roomId).emit('message:add', data)
+    addMessageToHistory(senderId, recipientId, data)
+    addMessageToHistory(recipientId, senderId, data)
+  })
+  socket.on('message:history', function (data) {
+    // {recipientId: '5e9483d6d96b341ba80bc28e', userId: '5e9483d6d96b341ba80bc28e'}
+    console.log('message:history')
+    console.log(data)
+    console.log(historyMessage)
+    if (
+      historyMessage[data.userId] &&
+      historyMessage[data.userId][data.recipientId]
+    ) {
+      socket.emit(
+        'message:history',
+        historyMessage[data.userId][data.recipientId],
+      )
+      console.log(historyMessage[data.userId][data.recipientId])
+    }
+  })
+  socket.on('disconnect', function (data) {
+    delete connectedUsers[socketId]
+    socket.broadcast.emit('users:leave', socketId)
+  })
+})
+
+const addMessageToHistory = (senderId, recipientId, data) => {
+  if (historyMessage[senderId]) {
+    if (historyMessage[senderId][recipientId]) {
+      if (historyMessage[senderId][recipientId].length > 10) {
+        historyMessage[senderId][recipientId].shift()
+      }
+      historyMessage[senderId][recipientId].push(data)
+    } else {
+      historyMessage[senderId][recipientId] = []
+      historyMessage[senderId][recipientId].push(data)
+    }
+  } else {
+    historyMessage[senderId] = {}
+    historyMessage[senderId][recipientId] = []
+    historyMessage[senderId][recipientId].push(data)
+  }
 }
