@@ -1,147 +1,179 @@
-const express = require('express')
-const router = express.Router()
-const tokens = require('../auth/tokens')
-const secret = require('../auth/config.json')
-const passport = require('passport')
-const db = require('../models')
-const helper = require('../helpers/serialize')
+const express = require("express");
+const router = express.Router();
+const tokens = require("../auth/tokens");
+const secret = require("../auth/config.json");
+const passport = require("passport");
+const db = require("../models");
+const helper = require("../helpers/serialize");
+const formidable = require("formidable");
+const fs = require("fs");
+const path = require("path");
 
 const auth = (req, res, next) => {
-  passport.authenticate('jwt', { session: false }, (err, user, info) => {
+  passport.authenticate("jwt", { session: false }, (err, user, info) => {
     if (!user || err) {
       res.status(401).json({
         code: 401,
-        message: 'Unauthorized',
-      })
+        message: "Unauthorized",
+      });
     } else {
-      next()
+      next();
     }
-  })(req, res, next)
-}
+  })(req, res, next);
+};
 
-router.post('/registration', async (req, res) => {
-  const { username } = req.body
-  const user = await db.getUserByName(username)
+router.post("/registration", async (req, res) => {
+  const { username } = req.body;
+  const user = await db.getUserByName(username);
   if (user) {
-    return res.status(400).json({})
+    return res.status(400).json({});
   }
   try {
-    const newUser = await db.createUser(req.body)
-    const token = await tokens.createTokens(newUser, secret.secret)
+    const newUser = await db.createUser(req.body);
+    const token = await tokens.createTokens(newUser, secret.secret);
     res.json({
       ...helper.serializeUser(newUser),
       ...token,
-    })
+    });
   } catch (e) {
-    console.log(e)
-    res.status(500).json({ message: e.message })
+    console.log(e);
+    res.status(500).json({ message: e.message });
   }
-})
+});
 
-router.post('/login', async (req, res, next) => {
+router.post("/login", async (req, res, next) => {
   passport.authenticate(
-    'local',
+    "local",
     { session: false },
     async (err, user, info) => {
       if (err) {
-        return next(err)
+        return next(err);
       }
       if (!user) {
-        return res.status(400).json({})
+        return res.status(400).json({});
       }
       if (user) {
-        const token = await tokens.createTokens(user, secret.secret)
-        console.log(token)
+        const token = await tokens.createTokens(user, secret.secret);
+        console.log(token);
         res.json({
           ...helper.serializeUser(user),
           ...token,
-        })
+        });
       }
-    },
-  )(req, res, next)
-})
+    }
+  )(req, res, next);
+});
 
-router.post('/refresh-token', async (req, res) => {
-  const refreshToken = req.headers['authorization']
-  const data = await tokens.refreshTokens(refreshToken, db, secret.secret)
-  res.json({ ...data })
-})
-
-router
-  .get('/profile', auth, async (req, res) => {
-    const token = req.headers['authorization']
-    const user = await tokens.getUserByToken(token, db, secret.secret)
-    res.json({
-      ...helper.serializeUser(user),
-    })
-  })
-  .patch('/profile', auth, async (req, res) => {
-    console.log(req.body)
-    // TODO:
-    const token = req.headers['authorization']
-    const user = await tokens.getUserByToken(token, db, secret.secret)
-    res.json({
-      ...helper.serializeUser(user),
-    })
-  })
+router.post("/refresh-token", async (req, res) => {
+  const refreshToken = req.headers["authorization"];
+  const data = await tokens.refreshTokens(refreshToken, db, secret.secret);
+  res.json({ ...data });
+});
 
 router
-  .get('/users', auth, async (req, res) => {
-    const users = await db.getUsers()
-    res.json(users.map((user) => helper.serializeUser(user)))
+  .get("/profile", auth, async (req, res) => {
+    const token = req.headers["authorization"];
+    const user = await tokens.getUserByToken(token, db, secret.secret);
+    res.json({
+      ...helper.serializeUser(user),
+    });
   })
-  .patch('/users/:id/permission', auth, async (req, res, next) => {
+  .patch("/profile", auth, async (req, res) => {
+    console.log(req.body);
+    const token = req.headers["authorization"];
+    const user = await tokens.getUserByToken(token, db, secret.secret);
+
+    let form = new formidable.IncomingForm();
+    form.uploadDir = path.join(process.cwd(), "public", "images", "upload");
+    form.parse(req, async function (err, fields, files) {
+      console.log(files);
+
+      const oldpath = files.avatar.path;
+      const newpath = path.join(
+        process.cwd(),
+        "public",
+        "images",
+        "upload",
+        files.avatar.name
+      );
+
+      fs.rename(oldpath, newpath, function (err) {
+        if (err) {
+          console.error(err);
+        }
+      });
+
+      try {
+        const token = req.headers["authorization"];
+        let user = await tokens.getUserByToken(token, db, secret.secret);
+        fields.image = path.join( "/", "images","upload", files.avatar.name );
+        user = await db.updateUserProfile(user.id, fields);
+        res.json({
+          ...helper.serializeUser(user),
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    });
+  });
+
+router
+  .get("/users", auth, async (req, res) => {
+    const users = await db.getUsers();
+    res.json(users.map((user) => helper.serializeUser(user)));
+  })
+  .patch("/users/:id/permission", auth, async (req, res, next) => {
     try {
-      const user = await db.updateUserPermission(req.params.id, req.body)
+      const user = await db.updateUserPermission(req.params.id, req.body);
       res.json({
         ...helper.serializeUser(user),
-      })
+      });
     } catch (e) {
-      next(e)
+      next(e);
     }
   })
-  .delete('/users/:id', auth, async (req, res) => {
-    await db.deleteUser(req.params.id)
-    res.json({})
-  })
+  .delete("/users/:id", auth, async (req, res) => {
+    await db.deleteUser(req.params.id);
+    res.json({});
+  });
 
 router
-  .get('/news', auth, async (req, res, next) => {
+  .get("/news", auth, async (req, res, next) => {
     try {
-      const news = await db.getNews()
-      return res.json(news)
+      const news = await db.getNews();
+      return res.json(news);
     } catch (e) {
-      next(e)
+      next(e);
     }
   })
-  .post('/news', auth, async (req, res, next) => {
+  .post("/news", auth, async (req, res, next) => {
     try {
-      const token = req.headers['authorization']
-      const user = await tokens.getUserByToken(token, db, secret.secret)
-      await db.createNews(req.body, helper.serializeUser(user))
-      const news = await db.getNews()
-      res.json(news)
+      const token = req.headers["authorization"];
+      const user = await tokens.getUserByToken(token, db, secret.secret);
+      await db.createNews(req.body, helper.serializeUser(user));
+      const news = await db.getNews();
+      res.json(news);
     } catch (e) {
-      next(e)
+      next(e);
     }
   })
-  .patch('/news/:id', auth, async (req, res, next) => {
+  .patch("/news/:id", auth, async (req, res, next) => {
     try {
-      await db.updateNews(req.params.id, req.body)
-      const news = await db.getNews()
-      res.json(news)
+      await db.updateNews(req.params.id, req.body);
+      const news = await db.getNews();
+      res.json(news);
     } catch (e) {
-      next(e)
+      next(e);
     }
   })
-  .delete('/news/:id', auth, async (req, res, next) => {
+  .delete("/news/:id", auth, async (req, res, next) => {
     try {
-      await db.deleteNews(req.params.id)
-      const news = await db.getNews()
-      res.json(news)
+      await db.deleteNews(req.params.id);
+      const news = await db.getNews();
+      res.json(news);
     } catch (e) {
-      next(e)
+      next(e);
     }
-  })
+  });
 
-module.exports = router
+module.exports = router;
